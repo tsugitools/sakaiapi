@@ -11,10 +11,14 @@ require_once "util.php";
 $LTI = LTIX::requireData();
 require_once("nav.php");
 
-$do_probe = U::get($_GET, 'probe') == '1';
+$probe_preset = U::get($_GET, 'probe');
+if ( $probe_preset === '1' ) {
+    $probe_preset = 'lti';
+}
+$do_probe = ($probe_preset === 'lti' || $probe_preset === 'sakai');
 $probe_result = false;
 if ( $do_probe ) {
-    $probe_result = sakai_get_token_and_probe($LTI);
+    $probe_result = sakai_get_token_and_probe($LTI, $probe_preset);
 }
 
 $OUTPUT->header();
@@ -26,8 +30,6 @@ $issuer = htmlentities($LTI->ltiParameter('issuer_key'));
 $token_url = htmlentities($LTI->ltiParameter('lti13_token_url'));
 $api_root = sakai_api_root($LTI);
 $probe_url = sakai_bearer_probe_url($LTI);
-$scopes = sakai_token_scopes($LTI);
-$scope_display = is_array($scopes) ? implode("\n", $scopes) : $scopes;
 
 ?>
 <h1>Sakai API bearer test</h1>
@@ -44,28 +46,36 @@ $scope_display = is_array($scopes) ? implode("\n", $scopes) : $scopes;
   <dt>Probe URL</dt><dd><code><?= htmlentities($probe_url ? $probe_url : '(unknown)') ?></code></dd>
 </dl>
 
-<h2>Scopes requested</h2>
-<pre><?= htmlentities($scope_display) ?></pre>
+<h2>Probe tests</h2>
 <p class="text-muted">
-  v0 uses one LTI scope to validate SAT signing and the probe endpoint.
   Token audience follows normal LTI rules from your issuer registration.
-  Overrides: <code>sakai_token_scope</code> (space-separated),
-  <code>sakai_api_root</code> (e.g. <code>https://localhost:8080/api</code>).
+  Optional overrides: <code>sakai_token_scope</code>, <code>sakai_api_root</code>.
 </p>
-
 <p>
-  <a class="btn btn-primary" href="index.php?probe=1">Get token &amp; probe</a>
+  <a class="btn btn-primary" href="index.php?probe=lti">LTI scope &amp; probe</a>
+  <a class="btn btn-default" href="index.php?probe=sakai">Sakai scope &amp; probe</a>
 </p>
+<ul class="text-muted">
+  <li><strong>LTI scope:</strong> <code>https://purl.imsglobal.org/spec/lti-ags/scope/lineitem</code> (working)</li>
+  <li><strong>Sakai scope:</strong> <code>sakai.lti.api.content.read</code> (expected to fail until granted in Sakai)</li>
+</ul>
 
 <?php if ( $do_probe ) { ?>
 <div id="probe-results">
-  <h2>Results</h2>
+  <h2>Results — <?= htmlentities($probe_result ? $probe_result['preset_label'] : '') ?></h2>
+<?php if ( $probe_result && is_array($probe_result['scopes']) ) { ?>
+  <p><strong>Scopes requested:</strong></p>
+  <pre><?= htmlentities(implode("\n", $probe_result['scopes'])) ?></pre>
+<?php } ?>
 <?php if ( $probe_result && $probe_result['ok'] ) { ?>
   <div class="alert alert-success">Probe succeeded (HTTP <?= (int) $probe_result['probe_http_code'] ?>).</div>
 <?php } else { ?>
   <div class="alert alert-warning">Probe did not report success.
 <?php if ( $probe_result && $probe_result['probe_http_code'] ) { ?>
   HTTP <?= (int) $probe_result['probe_http_code'] ?>.
+<?php } ?>
+<?php if ( $probe_result && ! $probe_result['access_token'] ) { ?>
+  Token request failed or returned no <code>access_token</code> (expected for Sakai-only scope until configured).
 <?php } ?>
 <?php if ( $probe_result && U::strlen($probe_result['missing']) > 0 ) { ?>
   Missing: <?= htmlentities($probe_result['missing']) ?>.

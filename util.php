@@ -5,22 +5,40 @@ use \Tsugi\Util\LTI13;
 use \Tsugi\Util\Net;
 use \Tsugi\Util\U;
 
+/** IMS LTI scope — known working for bearer-probe MVP. */
+function sakai_scopes_lti_lineitem() {
+    return array(
+        "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem",
+    );
+}
+
+/** Sakai-native scope (content.read permission); expected to fail until granted in Sakai. */
+function sakai_scopes_content_read() {
+    return array(
+        "sakai.lti.api.content.read",
+    );
+}
+
 /**
- * OAuth scopes for Sakai SAT token requests.
- *
- * v0: one standard IMS scope — enough to exercise client_assertion signing,
- * token issue, and bearer round-trip on /api/lti/bearer-probe. Add more via
- * sakai_token_scope once Sakai grants additional scopes for real webapi routes.
+ * Resolve scopes for a probe run. Preset names: lti, sakai.
+ * Setting sakai_token_scope still overrides any preset.
  */
-function sakai_token_scopes($launch) {
+function sakai_probe_scopes($launch, $preset = 'lti') {
     $override = $launch->settingsCascade('sakai_token_scope', null);
     if ( is_string($override) && U::strlen(trim($override)) > 0 ) {
         return preg_split('/\s+/', trim($override));
     }
+    if ( $preset === 'sakai' ) {
+        return sakai_scopes_content_read();
+    }
+    return sakai_scopes_lti_lineitem();
+}
 
-    return array(
-        "https://purl.imsglobal.org/spec/lti-ags/scope/lineitem",
-    );
+function sakai_probe_preset_label($preset) {
+    if ( $preset === 'sakai' ) {
+        return 'Sakai scope (sakai.lti.api.content.read)';
+    }
+    return 'LTI scope (lti-ags/lineitem)';
 }
 
 /**
@@ -74,10 +92,14 @@ function sakai_bearer_probe_url($launch) {
  * @return array Keys: ok, missing, token_url, probe_url, token_data, access_token,
  *     probe_http_code, probe_body, probe_json, debug_log
  */
-function sakai_get_token_and_probe($launch) {
+function sakai_get_token_and_probe($launch, $preset = 'lti') {
     $debug_log = array();
+    $scopes = sakai_probe_scopes($launch, $preset);
     $result = array(
         'ok' => false,
+        'preset' => $preset,
+        'preset_label' => sakai_probe_preset_label($preset),
+        'scopes' => $scopes,
         'missing' => '',
         'token_url' => '',
         'probe_url' => '',
@@ -106,7 +128,6 @@ function sakai_get_token_and_probe($launch) {
         return $result;
     }
 
-    $scopes = sakai_token_scopes($launch);
     $debug_log[] = 'Requested scopes: ' . (is_array($scopes) ? implode(' ', $scopes) : $scopes);
 
     $token_data = LTI13::get_access_token($scopes, $issuer_client, $lti13_token_url,

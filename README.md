@@ -5,7 +5,7 @@ Tsugi tool to exercise Sakai's LTI bearer token (SAT) and `/api` webapi endpoint
 ## What it does
 
 1. Launches as a normal LTI 1.3 tool from Sakai.
-2. On **Get token & probe**, POSTs to Sakai's token URL (from issuer registration) using Tsugi's `LTI13::get_access_token`.
+2. **LTI scope & probe** or **Sakai scope & probe** — POSTs to Sakai's token URL using Tsugi's `LTI13::get_access_token`, then GETs the bearer probe.
 3. GETs `{issuer}/api/lti/bearer-probe` with `Authorization: Bearer {SAT}`.
 4. Shows token JSON, probe JSON, and a debug log.
 
@@ -32,7 +32,12 @@ Local dev URLs (adjust host):
 | `sakai_token_scope` | Space-separated OAuth scopes (overrides defaults) |
 | `sakai_api_root` | e.g. `https://localhost:8080/api` if issuer URL is not the Sakai webapp root |
 
-Default scope is a single IMS LTI scope (`lti-ags/scope/lineitem`) to test signing and bearer round-trip. More scopes can be added here after Sakai’s admin UI and webapi enforcement catch up.
+| Button | Scope |
+|--------|--------|
+| LTI scope & probe | `https://purl.imsglobal.org/spec/lti-ags/scope/lineitem` |
+| Sakai scope & probe | `sakai.lti.api.content.read` (expected to fail until granted in Sakai) |
+
+`?probe=1` is an alias for `?probe=lti`.
 
 ## Related
 
