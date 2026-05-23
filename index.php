@@ -15,10 +15,18 @@ $probe_preset = U::get($_GET, 'probe');
 if ( $probe_preset === '1' ) {
     $probe_preset = 'lti';
 }
-$do_probe = ($probe_preset === 'lti' || $probe_preset === 'sakai');
+
+$probe_target = 'api';
+$scope_preset = $probe_preset;
+if ( is_string($probe_preset) && strpos($probe_preset, '-direct') !== false ) {
+    $probe_target = 'direct';
+    $scope_preset = str_replace('-direct', '', $probe_preset);
+}
+
+$do_probe = ($scope_preset === 'lti' || $scope_preset === 'sakai');
 $probe_result = false;
 if ( $do_probe ) {
-    $probe_result = sakai_get_token_and_probe($LTI, $probe_preset);
+    $probe_result = sakai_get_token_and_probe($LTI, $scope_preset, $probe_target);
 }
 
 $OUTPUT->header();
@@ -29,31 +37,38 @@ $OUTPUT->welcomeUserCourse();
 $issuer = htmlentities($LTI->ltiParameter('issuer_key'));
 $token_url = htmlentities($LTI->ltiParameter('lti13_token_url'));
 $api_root = sakai_api_root($LTI);
+$direct_root = sakai_direct_root($LTI);
 $probe_url = sakai_bearer_probe_url($LTI);
+$direct_probe_url = sakai_direct_bearer_probe_url($LTI);
 
 ?>
 <h1>Sakai API bearer test</h1>
 <p>
   This tool obtains a Sakai Access Token (SAT) via the LTI Advantage client-credentials
-  flow, then calls <code>GET /api/lti/bearer-probe</code> with
-  <code>Authorization: Bearer</code>.
+  flow, then calls a bearer probe with <code>Authorization: Bearer</code> on
+  <code>/api</code> or <code>/direct</code>.
 </p>
 
 <dl class="dl-horizontal">
   <dt>Issuer</dt><dd><?= $issuer ?></dd>
   <dt>Token URL</dt><dd><code><?= $token_url ?></code></dd>
   <dt>API root</dt><dd><code><?= htmlentities($api_root ? $api_root : '(unknown)') ?></code></dd>
-  <dt>Probe URL</dt><dd><code><?= htmlentities($probe_url ? $probe_url : '(unknown)') ?></code></dd>
+  <dt>/api probe</dt><dd><code><?= htmlentities($probe_url ? $probe_url : '(unknown)') ?></code></dd>
+  <dt>/direct root</dt><dd><code><?= htmlentities($direct_root ? $direct_root : '(unknown)') ?></code></dd>
+  <dt>/direct probe</dt><dd><code><?= htmlentities($direct_probe_url ? $direct_probe_url : '(unknown)') ?></code></dd>
 </dl>
 
 <h2>Probe tests</h2>
 <p class="text-muted">
   Token audience follows normal LTI rules from your issuer registration.
-  Optional overrides: <code>sakai_token_scope</code>, <code>sakai_api_root</code>.
+  Optional overrides: <code>sakai_token_scope</code>, <code>sakai_api_root</code>,
+  <code>sakai_direct_root</code>.
 </p>
 <p>
-  <a class="btn btn-primary" href="index.php?probe=lti">LTI scope &amp; probe</a>
-  <a class="btn btn-default" href="index.php?probe=sakai">Sakai scope &amp; probe</a>
+  <a class="btn btn-primary" href="index.php?probe=lti">LTI scope &amp; /api probe</a>
+  <a class="btn btn-default" href="index.php?probe=sakai">Sakai scope &amp; /api probe</a>
+  <a class="btn btn-primary" href="index.php?probe=lti-direct">LTI scope &amp; /direct probe</a>
+  <a class="btn btn-default" href="index.php?probe=sakai-direct">Sakai scope &amp; /direct probe</a>
 </p>
 <ul class="text-muted">
   <li><strong>LTI scope:</strong> <code>https://purl.imsglobal.org/spec/lti-ags/scope/lineitem</code> (working)</li>
@@ -62,7 +77,8 @@ $probe_url = sakai_bearer_probe_url($LTI);
 
 <?php if ( $do_probe ) { ?>
 <div id="probe-results">
-  <h2>Results — <?= htmlentities($probe_result ? $probe_result['preset_label'] : '') ?></h2>
+  <h2>Results — <?= htmlentities($probe_result ? $probe_result['preset_label'] : '') ?>
+    on <?= htmlentities($probe_result ? $probe_result['probe_target_label'] : '') ?></h2>
 <?php if ( $probe_result && is_array($probe_result['scopes']) ) { ?>
   <p><strong>Scopes requested:</strong></p>
   <pre><?= htmlentities(implode("\n", $probe_result['scopes'])) ?></pre>

@@ -65,6 +65,17 @@ function sakai_load_lti13_data($launch, &$lti13_token_url, &$privkey, &$kid,
 }
 
 /**
+ * Sakai server base URL from issuer_key (no path suffix).
+ */
+function sakai_server_root($launch) {
+    $iss = $launch->ltiParameter('issuer_key');
+    if ( ! is_string($iss) || U::strlen(trim($iss)) < 1 ) {
+        return false;
+    }
+    return rtrim(trim($iss), '/');
+}
+
+/**
  * Sakai webapi context path (/api) from issuer URL or optional key setting.
  */
 function sakai_api_root($launch) {
@@ -73,11 +84,27 @@ function sakai_api_root($launch) {
         return rtrim(trim($override), '/');
     }
 
-    $iss = $launch->ltiParameter('issuer_key');
-    if ( ! is_string($iss) || U::strlen(trim($iss)) < 1 ) {
+    $root = sakai_server_root($launch);
+    if ( ! $root ) {
         return false;
     }
-    return rtrim(trim($iss), '/') . '/api';
+    return $root . '/api';
+}
+
+/**
+ * Entity Broker context path (/direct) from issuer URL or optional key setting.
+ */
+function sakai_direct_root($launch) {
+    $override = $launch->settingsCascade('sakai_direct_root', null);
+    if ( is_string($override) && U::strlen(trim($override)) > 0 ) {
+        return rtrim(trim($override), '/');
+    }
+
+    $root = sakai_server_root($launch);
+    if ( ! $root ) {
+        return false;
+    }
+    return $root . '/direct';
 }
 
 function sakai_bearer_probe_url($launch) {
@@ -86,19 +113,77 @@ function sakai_bearer_probe_url($launch) {
     return $root . '/lti/bearer-probe';
 }
 
+function sakai_direct_bearer_probe_url($launch) {
+    $root = sakai_direct_root($launch);
+    if ( ! $root ) return false;
+    return $root . '/lti/bearer-probe';
+}
+
 /**
- * Obtain a Sakai Access Token (SAT) and call GET /api/lti/bearer-probe.
+ * Probe target: webapi ({@code api}) or Entity Broker ({@code direct}).
+ */
+function sakai_probe_target_url($launch, $target = 'api') {
+    if ( $target === 'direct' ) {
+        return sakai_direct_bearer_probe_url($launch);
+    }
+    return sakai_bearer_probe_url($launch);
+}
+
+function sakai_probe_target_label($target = 'api') {
+    if ( $target === 'direct' ) {
+        return '/direct';
+    }
+    return '/api';
+}
+
+/**
+ * GET a bearer-probe URL with the SAT.
  *
- * @return array Keys: ok, missing, token_url, probe_url, token_data, access_token,
+ * @return array probe_http_code, probe_body, probe_json
+ */
+function sakai_run_bearer_probe($probe_url, $access_token, &$debug_log) {
+    $result = array(
+        'probe_http_code' => false,
+        'probe_body' => false,
+        'probe_json' => false,
+    );
+
+    $header = "Authorization: Bearer " . $access_token . "\n"
+        . "Accept: application/json";
+    $debug_log[] = 'GET ' . $probe_url;
+    $debug_log[] = $header;
+
+    $probe_body = Net::doGet($probe_url, $header);
+    $result['probe_http_code'] = Net::getLastHttpResponse();
+    $result['probe_body'] = $probe_body;
+
+    if ( is_string($probe_body) && U::strlen($probe_body) > 0 ) {
+        $json = json_decode($probe_body);
+        if ( $json !== null ) {
+            $result['probe_json'] = $json;
+        }
+    }
+
+    return $result;
+}
+
+/**
+ * Obtain a Sakai Access Token (SAT) and call GET .../lti/bearer-probe on /api or /direct.
+ *
+ * @param string $preset Scope preset: lti, sakai
+ * @param string $target Probe target: api, direct
+ * @return array Keys: ok, missing, token_url, probe_url, probe_target, token_data, access_token,
  *     probe_http_code, probe_body, probe_json, debug_log
  */
-function sakai_get_token_and_probe($launch, $preset = 'lti') {
+function sakai_get_token_and_probe($launch, $preset = 'lti', $target = 'api') {
     $debug_log = array();
     $scopes = sakai_probe_scopes($launch, $preset);
     $result = array(
         'ok' => false,
         'preset' => $preset,
         'preset_label' => sakai_probe_preset_label($preset),
+        'probe_target' => $target,
+        'probe_target_label' => sakai_probe_target_label($target),
         'scopes' => $scopes,
         'missing' => '',
         'token_url' => '',
@@ -119,11 +204,12 @@ function sakai_get_token_and_probe($launch, $preset = 'lti') {
         return $result;
     }
 
-    $probe_url = sakai_bearer_probe_url($launch);
+    $probe_url = sakai_probe_target_url($launch, $target);
     $result['token_url'] = $lti13_token_url;
     $result['probe_url'] = $probe_url;
     if ( ! $probe_url ) {
-        $debug_log[] = 'Could not determine Sakai /api base from issuer_key';
+        $debug_log[] = 'Could not determine Sakai ' . sakai_probe_target_label($target)
+            . ' base from issuer_key';
         $result['missing'] = 'issuer_key';
         return $result;
     }
@@ -141,21 +227,10 @@ function sakai_get_token_and_probe($launch, $preset = 'lti') {
         return $result;
     }
 
-    $header = "Authorization: Bearer " . $access_token . "\n"
-        . "Accept: application/json";
-    $debug_log[] = 'GET ' . $probe_url;
-    $debug_log[] = $header;
-
-    $probe_body = Net::doGet($probe_url, $header);
-    $result['probe_http_code'] = Net::getLastHttpResponse();
-    $result['probe_body'] = $probe_body;
-
-    if ( is_string($probe_body) && U::strlen($probe_body) > 0 ) {
-        $json = json_decode($probe_body);
-        if ( $json !== null ) {
-            $result['probe_json'] = $json;
-        }
-    }
+    $probe = sakai_run_bearer_probe($probe_url, $access_token, $debug_log);
+    $result['probe_http_code'] = $probe['probe_http_code'];
+    $result['probe_body'] = $probe['probe_body'];
+    $result['probe_json'] = $probe['probe_json'];
 
     $code = $result['probe_http_code'];
     $result['ok'] = ($code == 200 && is_object($result['probe_json'])
